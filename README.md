@@ -1,4 +1,4 @@
-# Stock Transformer — Full-Stack App
+# Stock Transformer
 
 Turns the `Stock_Transformer_Colab` research notebook (Transformer encoder forecasting
 INFY and HUL next-day closes) into a deployable full-stack app:
