@@ -7,6 +7,8 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
+from .evaluation import chronological_train_validation_indices
+
 
 def classifier_input(sequences, flatten):
     sequences = np.asarray(sequences)
@@ -37,27 +39,31 @@ def _candidates():
 def fit_direction_classifier(train_sequences, train_returns, evaluation_sequences):
     """Select on the chronological training tail, refit before the OOS period."""
     labels = (np.asarray(train_returns) > 0).astype(np.int64)
-    split = int(len(train_sequences) * 0.8)
+    train_idx, valid_idx = chronological_train_validation_indices(len(train_sequences), 0.8)
+    split = int(train_idx[-1] + 1)
     if split < 2 or len(np.unique(labels[:split])) < 2 or len(np.unique(labels[split:])) < 2:
         raise ValueError("Not enough up and down observations to train the direction classifier")
 
     choices = []
     for name, flatten, estimator in _candidates():
-        x_train = classifier_input(train_sequences[:split], flatten)
-        x_valid = classifier_input(train_sequences[split:], flatten)
+        x_train = classifier_input(train_sequences[train_idx], flatten)
+        x_valid = classifier_input(train_sequences[valid_idx], flatten)
         pipeline = make_pipeline(StandardScaler(), clone(estimator))
-        pipeline.fit(x_train, labels[:split])
-        val_accuracy = float(np.mean(pipeline.predict(x_valid) == labels[split:]))
+        pipeline.fit(x_train, labels[train_idx])
+        val_accuracy = float(np.mean(pipeline.predict(x_valid) == labels[valid_idx]))
         choices.append((val_accuracy, name, flatten, estimator))
 
     val_accuracy, name, flatten, estimator = max(choices, key=lambda item: (item[0], item[1]))
     pipeline = make_pipeline(StandardScaler(), clone(estimator))
     pipeline.fit(classifier_input(train_sequences, flatten), labels)
-    predictions = pipeline.predict(classifier_input(evaluation_sequences, flatten)).astype(np.int64)
+    eval_x = classifier_input(evaluation_sequences, flatten)
+    predictions = pipeline.predict(eval_x).astype(np.int64)
+    confidence = pipeline.predict_proba(eval_x).max(axis=1)
     return {
         "model": pipeline,
         "flatten": flatten,
         "name": name,
         "validation_accuracy": val_accuracy,
         "predictions": predictions,
+        "confidence": confidence,
     }

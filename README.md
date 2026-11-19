@@ -1,86 +1,92 @@
 # Stock Transformer
 
-Turns the `Stock_Transformer_Colab` research notebook (Transformer encoder forecasting
-INFY and HUL next-day closes) into a deployable full-stack app:
+A real-data, one-session stock forecasting research app for INFY and HUL. The backend fetches Yahoo Finance prices, trains the Transformer model from the real-data notebook, and serves dated evaluation results. The Transformer directly predicts signed next-session log returns.
 
-- **backend/** — FastAPI service. Serves precomputed research results (metrics, charts,
-  monthly error breakdown) and a **live** `/api/predict/{ticker}` endpoint that pulls the
-  latest data and runs the trained model.
-- **frontend/** — React (Vite) dashboard. Ticker switcher, live prediction panel, and the
-  full set of research charts (price history, predicted-vs-actual, MC-dropout uncertainty
-  bands, monthly error table, train/val loss curves).
+The real-data model notebook is included under [`notebooks/Real_Stock_Transformer_Colab.ipynb`](notebooks/Real_Stock_Transformer_Colab.ipynb). [Open it directly in Google Colab](https://colab.research.google.com/drive/1q77xK1usuv78F00fAkTmXhV8957GBZKK).
 
-## How it maps to the notebook
+## Architecture and targets
 
-| Notebook section                                | Backend file            |
-|--------------------------------------------------|--------------------------|
-| §2 Data acquisition (Yahoo Finance via yfinance) | `app/data.py`         |
-| §4 Feature engineering                            | `app/features.py`      |
-| §5 `StockTransformer` model                       | `app/model.py`          |
-| §6 Training & walk-forward evaluation             | `app/train.py`          |
-| §12 Monte Carlo dropout                           | `app/train.py`, `app/inference.py` |
+| Area | File | Role |
+|---|---|---|
+| Data | `backend/app/data.py` | Yahoo Finance daily close input; synthetic data only by explicit opt-in |
+| Features | `backend/app/features.py` | Nine causal features, 20-session samples, next-session log-return target |
+| Transformer | `backend/app/model.py` | Two-layer Transformer encoder with scalar normalized log-return output |
+| Direction | Transformer output sign | The notebook predicts signed next-session log return directly; positive is up, negative is down |
+| Evaluation | `backend/app/evaluation.py` | Train-only reference models, confusion metrics, logistic-baseline confidence buckets, delayed backtest diagnostic |
+| Training | `backend/app/train.py` | Notebook-matched 80/20 chronological training/validation and untouched 2025-01-01–2026-06-30 holdout |
+| Inference | `backend/app/inference.py` | Current real-data window and direct Transformer return prediction |
+| API | `backend/app/main.py` | Results, health, ticker and live prediction endpoints |
+| UI | `frontend/src/` | Summary, scorecard, charts and monthly results |
+| Company profiles | `backend/app/company.py`, `frontend/src/components/CompanyPage.jsx` | Yahoo Finance company profile, quote, valuation, annual financials and one-year price chart |
 
-`train.py` runs the exact same pipeline as the notebook, then saves:
-- a model checkpoint (`backend/models/<TICKER>.pt`) for live inference
-- a precomputed results JSON (`backend/precomputed/<TICKER>.json`) for the dashboard,
-  so the frontend doesn't need to re-run training on every page load.
+For each target session, the input window ends at the preceding known close. The target is `log(next_close / prior_close)`. The Transformer directly predicts this signed return; its sign determines direction. Directional accuracy is computed from the predicted return sign, not from close-level R².
 
-`inference.py` loads that checkpoint and predicts the *next* trading day's close using
-the freshest data it can fetch from Yahoo Finance via `yfinance`. If real data cannot be
-fetched, the API returns an error; it never substitutes synthetic prices for a real-data
-forecast.
+## Evaluation design
 
-Model checkpoints and precomputed JSON are included in this repo. Older bundles may have
-been generated from synthetic data; the API will not present those as real-data results.
-Run the training pipeline once with Yahoo Finance access to regenerate the checkpoints
-and evaluation results from real prices. Synthetic generation remains available only
-when explicitly requested by development code.
+- The report-aligned split is chronological: training data runs through 2024-12-31 and the untouched test period runs from 2025-01-01 through 2026-06-30. Market dates without a trading session are naturally absent.
+- Epoch selection and direction-model selection use a chronological tail of pre-test training observations only. After epoch selection, the Transformer refits through the full pre-test period.
+- Preprocessing is fitted within each training fit. Reference regression and direction-baseline models use the same test dates as the forecast model.
+- Regression scorecards include previous-close persistence, a five-close moving average, linear log-return regression, percentage-return Ridge, volatility-normalized Ridge, and the notebook Transformer forecast.
+- Direction scorecards include always-up, training majority class, logistic regression, the notebook Transformer’s raw-return sign, and an expanding logistic refit at each test origin. Metrics include accuracy with a Wilson 95% interval, balanced accuracy, up precision/recall/F1, MCC, confusion matrix, and actual class mix.
+- The three-class experiment uses a causal threshold `max(10 bp, 0.25 × trailing 20-session volatility)`. The rule is fixed before test evaluation.
+- The optional scorecard strategy is long/flat and delays action one session. It uses close-only returns and charges 10 bp per position turnover unit. This is a diagnostic proxy; it omits opening-price fills, liquidity, borrow, taxes and market impact, so its results are not a claim of executable profitability.
+- R² is computed on close levels. It can be high because prices trend and must be interpreted alongside persistence errors and return-direction metrics.
 
-## Run locally
+The expanded comparison fields are written to `backend/precomputed/<TICKER>.json` under `evaluation` and `evaluation_metadata`. Old precomputed files without those keys are identified by the UI as needing regeneration; the app does not fabricate comparison metrics.
 
-**Backend**
+On each company page, the test calendar opens a dedicated date analysis with actual and predicted closes, returns, direction result, price error, dropout range, and a nearby actual-versus-predicted chart. These date pages are opened from the company page and are not top-level navigation items.
+
+## Setup and run
+
+Backend, from `backend/`:
+
 ```bash
-cd backend
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
-**Frontend** (separate terminal)
+Frontend, in another terminal from `frontend/`:
+
 ```bash
-cd frontend
 npm install
 npm run dev
 ```
-The frontend reads the API base URL from `VITE_API_URL` (see `frontend/.env`, defaults
-to `http://localhost:8000`).
 
-To fetch real Yahoo Finance prices and retrain both models and evaluation results:
+Set `VITE_API_URL` to the backend URL if it is not `http://localhost:8000`.
+
+## Reproduce the evaluation
+
+From `backend/`, with Yahoo Finance access:
+
 ```bash
-cd backend
 python -m app.train
 ```
 
-## Deploy
+This fetches current real data, refits the models, evaluates the predeclared holdout and baselines, then updates the two `.pt` checkpoints and JSON payloads. It does not substitute synthetic prices if the Yahoo Finance request fails.
 
-**Backend → Render**
-1. Push `backend/` to a GitHub repo (or the whole `stock-app/` folder as a monorepo).
-2. On Render: New → Web Service → point at the repo, root directory `backend`.
-3. Render will pick up `render.yaml` automatically (CPU-only torch install + uvicorn
-   start command). Free tier is enough — the model is ~70k parameters.
-4. Note the deployed URL, e.g. `https://stock-transformer-api.onrender.com`.
+Run deterministic unit checks from `backend/`:
 
-**Frontend → Vercel**
-1. Push `frontend/` (same repo, root directory `frontend`).
-2. On Vercel: New Project → import the repo, root directory `frontend`.
-3. Set environment variable `VITE_API_URL` to your Render backend URL.
-4. Deploy. Vercel picks up `vercel.json` automatically.
+```bash
+python -m unittest discover -s tests -v
+```
 
-**CORS**: `backend/app/main.py` currently allows all origins (`allow_origins=["*"]`) so
-this works immediately. Once you know your Vercel domain, tighten that list.
+Frontend quality checks from `frontend/`:
 
-## API reference
+```bash
+npm run lint
+npm run build
+```
 
-- `GET /api/health` — liveness check
-- `GET /api/tickers` — `{"tickers": ["INFY", "HUL"]}`
-- `GET /api/results/{ticker}` — full precomputed dashboard payload
-- `GET /api/predict/{ticker}` — live next-day prediction with an 80% MC-dropout CI
+## API
+
+- `GET /api/health`
+- `GET /api/tickers`
+- `GET /api/company/{ticker}` — live quote, company profile, valuation ratios, annual statements, and one-year closing-price history
+- `GET /api/results/{ticker}` — saved real-data evaluation payload
+- `GET /api/predict/{ticker}` — live next-session estimate; returns an error if real prices or a verified checkpoint are unavailable
+
+## Findings and limitations
+
+See [MODEL_AUDIT.md](MODEL_AUDIT.md) for the initial audit of the earlier classifier-based pipeline. This project now follows the attached real-data notebook: the Transformer predicts the signed return directly. High price-level R² does not imply predictive return direction. Daily price data and a single holdout provide limited evidence, and dropout intervals are not calibrated. These models are for research and education, not investment advice.
+
+The dashboard deploys as a Vite frontend and FastAPI backend. Configure `VITE_API_URL` to the deployed backend and restrict CORS in `backend/app/main.py` to the intended frontend origin before public deployment.

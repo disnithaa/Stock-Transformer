@@ -11,6 +11,7 @@ async function get(path) {
 
 export const api = {
   tickers: () => get("/api/tickers"),
+  company: (ticker) => get(`/api/company/${ticker}`),
   results: (ticker) => get(`/api/results/${ticker}`),
   predict: (ticker) => get(`/api/predict/${ticker}`),
 };
