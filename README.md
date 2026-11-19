@@ -14,7 +14,7 @@ INFY and HUL next-day closes) into a deployable full-stack app:
 
 | Notebook section                                | Backend file            |
 |--------------------------------------------------|--------------------------|
-| §2 Data acquisition (yfinance + synthetic fallback) | `app/data.py`         |
+| §2 Data acquisition (Yahoo Finance via yfinance) | `app/data.py`         |
 | §4 Feature engineering                            | `app/features.py`      |
 | §5 `StockTransformer` model                       | `app/model.py`          |
 | §6 Training & walk-forward evaluation             | `app/train.py`          |
@@ -26,12 +26,15 @@ INFY and HUL next-day closes) into a deployable full-stack app:
   so the frontend doesn't need to re-run training on every page load.
 
 `inference.py` loads that checkpoint and predicts the *next* trading day's close using
-the freshest data it can fetch — real NSE data via `yfinance` when the server has
-outbound internet, else the same statistically-calibrated synthetic generator used in
-training.
+the freshest data it can fetch from Yahoo Finance via `yfinance`. If real data cannot be
+fetched, the API returns an error; it never substitutes synthetic prices for a real-data
+forecast.
 
-Model checkpoints and precomputed JSON for INFY and HUL are already included in this
-repo (trained during setup), so the app works out of the box without retraining.
+Model checkpoints and precomputed JSON are included in this repo. Older bundles may have
+been generated from synthetic data; the API will not present those as real-data results.
+Run the training pipeline once with Yahoo Finance access to regenerate the checkpoints
+and evaluation results from real prices. Synthetic generation remains available only
+when explicitly requested by development code.
 
 ## Run locally
 
@@ -51,8 +54,7 @@ npm run dev
 The frontend reads the API base URL from `VITE_API_URL` (see `frontend/.env`, defaults
 to `http://localhost:8000`).
 
-To retrain from scratch (e.g. to pull real yfinance data instead of the bundled
-checkpoints):
+To fetch real Yahoo Finance prices and retrain both models and evaluation results:
 ```bash
 cd backend
 python -m app.train

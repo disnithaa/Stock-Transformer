@@ -6,7 +6,7 @@ import pandas as pd
 import torch
 import torch.nn as nn
 
-from .data import TICKERS, TRAIN_END, TRAIN_START, TEST_END, TEST_START, load_stock_data
+from .data import REAL_DATA_SOURCE, TICKERS, TRAIN_END, TRAIN_START, TEST_END, TEST_START, load_stock_data
 from .features import FEATURES, WINDOW, compute_features, make_sequences
 from .model import StockTransformer
 
@@ -19,6 +19,8 @@ os.makedirs(PRECOMPUTED_DIR, exist_ok=True)
 
 
 def run_pipeline(ticker, df, epochs=40, batch_size=32, mc_passes=80, use_real_flag=True, seed=0):
+    if use_real_flag and df.attrs.get("data_source") != REAL_DATA_SOURCE:
+        raise ValueError("Real-data training requires a dataset fetched from Yahoo Finance.")
     np.random.seed(seed)
     torch.manual_seed(seed)
 
@@ -119,6 +121,8 @@ def run_pipeline(ticker, df, epochs=40, batch_size=32, mc_passes=80, use_real_fl
             "x_max": x_max,
             "y_mean": y_mean,
             "y_std": y_std,
+            "data_source": df.attrs.get("data_source", "synthetic"),
+            "data_fetched_at": df.attrs.get("data_fetched_at"),
         },
         ckpt_path,
     )
@@ -146,10 +150,16 @@ def run_pipeline(ticker, df, epochs=40, batch_size=32, mc_passes=80, use_real_fl
     step = max(1, len(full_dates) // 1500)
     hist_dates = full_dates[::step]
     hist_close = full_close[::step]
+    if hist_dates[-1] != full_dates[-1]:
+        hist_dates.append(full_dates[-1])
+        hist_close.append(full_close[-1])
 
     payload = {
         "ticker": ticker,
-        "data_source": "synthetic" if not use_real_flag else "real_or_synthetic_fallback",
+        "data_source": df.attrs.get("data_source", "synthetic"),
+        "data_fetched_at": df.attrs.get("data_fetched_at"),
+        "data_start_date": pd.to_datetime(df["Date"]).min().strftime("%Y-%m-%d"),
+        "data_end_date": pd.to_datetime(df["Date"]).max().strftime("%Y-%m-%d"),
         "metrics": {"MAE": mae, "MSE": mse, "RMSE": rmse, "R2": r2, "DA": da},
         "best_epoch": best_epoch,
         "train_losses": train_losses,
@@ -172,8 +182,9 @@ def run_pipeline(ticker, df, epochs=40, batch_size=32, mc_passes=80, use_real_fl
 
 
 def main():
+    latest_available = pd.Timestamp.now().strftime("%Y-%m-%d")
     for ticker in TICKERS:
-        df = load_stock_data(ticker, use_real=True)
+        df = load_stock_data(ticker, use_real=True, end=latest_available)
         run_pipeline(ticker, df)
 
 

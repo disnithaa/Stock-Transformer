@@ -1,9 +1,10 @@
 import os
+from datetime import datetime, timezone
 
 import numpy as np
 import torch
 
-from .data import load_stock_data, TEST_END
+from .data import REAL_DATA_SOURCE, load_stock_data
 from .features import latest_window
 from .model import StockTransformer
 
@@ -20,6 +21,8 @@ def _load_checkpoint(ticker: str):
     if not os.path.exists(path):
         raise FileNotFoundError(f"No trained checkpoint for {ticker}. Run training first.")
     ckpt = torch.load(path, map_location="cpu", weights_only=False)
+    if ckpt.get("data_source") != REAL_DATA_SOURCE:
+        raise FileNotFoundError(f"The {ticker} checkpoint was not trained on verified Yahoo Finance data. Retrain the model first.")
     model = StockTransformer(n_features=ckpt["n_features"])
     model.load_state_dict(ckpt["state_dict"])
     model.eval()
@@ -34,9 +37,8 @@ def predict_next_day(ticker: str, mc_passes: int = 80):
     x_min, x_max = ckpt["x_min"], ckpt["x_max"]
     y_mean, y_std = ckpt["y_mean"], ckpt["y_std"]
 
-    # Pull the freshest data available (real via yfinance when the deployment has internet,
-    # else the same synthetic generator used for training) and build the latest feature window.
-    df = load_stock_data(ticker, use_real=True, end=TEST_END)
+    # Live inference requires current real prices and never falls back to generated data.
+    df = load_stock_data(ticker, use_real=True, end=datetime.now(timezone.utc).date().isoformat())
     X, last_close, last_date = latest_window(df)
 
     Xs = (X - x_min) / (x_max - x_min)
@@ -66,4 +68,5 @@ def predict_next_day(ticker: str, mc_passes: int = 80):
         "predicted_return_pct": round(float(pred_ret) * 100, 3),
         "ci80_low": round(min(p10_close, p90_close), 2),
         "ci80_high": round(max(p10_close, p90_close), 2),
+        "data_source": REAL_DATA_SOURCE,
     }
