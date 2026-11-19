@@ -5,6 +5,7 @@ import numpy as np
 import torch
 
 from .data import REAL_DATA_SOURCE, load_stock_data
+from .direction import classifier_input
 from .features import latest_window
 from .model import StockTransformer
 
@@ -48,11 +49,20 @@ def predict_next_day(ticker: str, mc_passes: int = 80):
     with torch.no_grad():
         pred_ret = (model(Xt).numpy() * y_std + y_mean)[0]
 
+    direction_model = ckpt.get("direction_model")
+    if direction_model is None:
+        raise FileNotFoundError(f"No direction classifier is saved for {ticker}. Retrain the model first.")
+    direction_class = int(
+        direction_model.predict(classifier_input(X, ckpt["direction_flatten"]))[0]
+    )
+    direction_sign = 1.0 if direction_class == 1 else -1.0
+    pred_ret = direction_sign * abs(float(pred_ret))
+
     model.train()
     mc_preds = []
     with torch.no_grad():
         for _ in range(mc_passes):
-            mc_preds.append((model(Xt).numpy() * y_std + y_mean)[0])
+            mc_preds.append(direction_sign * abs(float((model(Xt).numpy() * y_std + y_mean)[0])))
     mc_preds = np.array(mc_preds)
     p10, p90 = np.percentile(mc_preds, [10, 90])
 
@@ -66,6 +76,7 @@ def predict_next_day(ticker: str, mc_passes: int = 80):
         "last_close": round(float(last_close), 2),
         "predicted_next_close": round(pred_close, 2),
         "predicted_return_pct": round(float(pred_ret) * 100, 3),
+        "predicted_direction": "up" if direction_class == 1 else "down",
         "ci80_low": round(min(p10_close, p90_close), 2),
         "ci80_high": round(max(p10_close, p90_close), 2),
         "data_source": REAL_DATA_SOURCE,

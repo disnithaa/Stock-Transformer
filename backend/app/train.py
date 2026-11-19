@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 
 from .data import REAL_DATA_SOURCE, TICKERS, TRAIN_END, TRAIN_START, TEST_END, TEST_START, load_stock_data
+from .direction import fit_direction_classifier
 from .features import FEATURES, WINDOW, compute_features, make_sequences
 from .model import StockTransformer
 
@@ -33,6 +34,8 @@ def run_pipeline(ticker, df, epochs=40, batch_size=32, mc_passes=80, use_real_fl
     Xte_full, yte_full, dte_full, cte_full = make_sequences(test_df, WINDOW)
     keep = pd.to_datetime(dte_full) >= pd.Timestamp(TEST_START)
     Xte, yte, dte, cte = Xte_full[keep], yte_full[keep], dte_full[keep], cte_full[keep]
+    direction = fit_direction_classifier(Xtr_full, ytr_full, Xte)
+    direction_sign = np.where(direction["predictions"] > 0, 1.0, -1.0)
 
     n = len(Xtr_full)
     split = int(n * 0.8)
@@ -91,6 +94,7 @@ def run_pipeline(ticker, df, epochs=40, batch_size=32, mc_passes=80, use_real_fl
     model.eval()
     with torch.no_grad():
         pred_ret = unscale_y(model(Xte_t).cpu().numpy())
+    pred_ret = direction_sign * np.abs(pred_ret)
     actual_ret = yte
     pred_close = cte * np.exp(pred_ret)
     actual_close = cte * np.exp(actual_ret)
@@ -100,7 +104,7 @@ def run_pipeline(ticker, df, epochs=40, batch_size=32, mc_passes=80, use_real_fl
     ss_res = np.sum((actual_close - pred_close) ** 2)
     ss_tot = np.sum((actual_close - actual_close.mean()) ** 2)
     r2 = float(1 - ss_res / ss_tot)
-    da = float(np.mean(np.sign(pred_ret) == np.sign(actual_ret)) * 100)
+    da = float(np.mean(direction["predictions"] == (actual_ret > 0)) * 100)
 
     model.train()
     mc_preds = []
@@ -108,6 +112,7 @@ def run_pipeline(ticker, df, epochs=40, batch_size=32, mc_passes=80, use_real_fl
         for _ in range(mc_passes):
             mc_preds.append(unscale_y(model(Xte_t).cpu().numpy()))
     mc_preds = np.array(mc_preds)
+    mc_preds = mc_preds * direction_sign[None, :]
     mc_p10 = np.percentile(mc_preds, 10, axis=0)
     mc_p90 = np.percentile(mc_preds, 90, axis=0)
 
@@ -123,6 +128,10 @@ def run_pipeline(ticker, df, epochs=40, batch_size=32, mc_passes=80, use_real_fl
             "y_std": y_std,
             "data_source": df.attrs.get("data_source", "synthetic"),
             "data_fetched_at": df.attrs.get("data_fetched_at"),
+            "direction_model": direction["model"],
+            "direction_model_name": direction["name"],
+            "direction_flatten": direction["flatten"],
+            "direction_validation_accuracy": direction["validation_accuracy"],
         },
         ckpt_path,
     )
@@ -161,6 +170,8 @@ def run_pipeline(ticker, df, epochs=40, batch_size=32, mc_passes=80, use_real_fl
         "data_start_date": pd.to_datetime(df["Date"]).min().strftime("%Y-%m-%d"),
         "data_end_date": pd.to_datetime(df["Date"]).max().strftime("%Y-%m-%d"),
         "metrics": {"MAE": mae, "MSE": mse, "RMSE": rmse, "R2": r2, "DA": da},
+        "direction_model_name": direction["name"],
+        "direction_validation_accuracy": direction["validation_accuracy"],
         "best_epoch": best_epoch,
         "train_losses": train_losses,
         "val_losses": val_losses,
