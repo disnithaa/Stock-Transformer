@@ -5,6 +5,7 @@ import numpy as np
 import torch
 
 from .data import REAL_DATA_SOURCE, load_stock_data
+from .direction import classifier_input
 from .features import latest_window
 from .model import StockTransformer
 
@@ -23,6 +24,8 @@ def _load_checkpoint(ticker: str):
     ckpt = torch.load(path, map_location="cpu", weights_only=False)
     if ckpt.get("data_source") != REAL_DATA_SOURCE:
         raise FileNotFoundError(f"The {ticker} checkpoint was not trained on verified Yahoo Finance data. Retrain the model first.")
+    if ckpt.get("model_name") != "Stock Transformer · notebook architecture":
+        raise FileNotFoundError(f"The {ticker} checkpoint uses an older model. Run the notebook-aligned training pipeline first.")
     model = StockTransformer(n_features=ckpt["n_features"])
     model.load_state_dict(ckpt["state_dict"])
     model.eval()
@@ -47,12 +50,26 @@ def predict_next_day(ticker: str, mc_passes: int = 80):
     model.eval()
     with torch.no_grad():
         pred_ret = (model(Xt).numpy() * y_std + y_mean)[0]
+    direction_model = ckpt.get("direction_model")
+    direction_constant = ckpt.get("direction_constant")
+    if direction_model is not None:
+        direction_class = int(
+            direction_model.predict(classifier_input(X, ckpt["direction_flatten"]))[0]
+        )
+        direction_sign = 1.0 if direction_class == 1 else -1.0
+        pred_ret = direction_sign * abs(float(pred_ret))
+    elif direction_constant is not None:
+        direction_sign = 1.0 if int(direction_constant) == 1 else -1.0
+        pred_ret = direction_sign * abs(float(pred_ret))
+    else:
+        direction_sign = 1.0 if pred_ret > 0 else -1.0
 
     model.train()
     mc_preds = []
     with torch.no_grad():
         for _ in range(mc_passes):
-            mc_preds.append((model(Xt).numpy() * y_std + y_mean)[0])
+            raw_return = float((model(Xt).numpy() * y_std + y_mean)[0])
+            mc_preds.append(direction_sign * abs(raw_return) if (direction_model is not None or direction_constant is not None) else raw_return)
     mc_preds = np.array(mc_preds)
     p10, p90 = np.percentile(mc_preds, [10, 90])
 
@@ -66,6 +83,8 @@ def predict_next_day(ticker: str, mc_passes: int = 80):
         "last_close": round(float(last_close), 2),
         "predicted_next_close": round(pred_close, 2),
         "predicted_return_pct": round(float(pred_ret) * 100, 3),
+        "predicted_direction": "up" if pred_ret > 0 else "down" if pred_ret < 0 else "flat",
+        "direction_model_name": ckpt.get("direction_model_name", "Transformer raw-return sign"),
         "ci80_low": round(min(p10_close, p90_close), 2),
         "ci80_high": round(max(p10_close, p90_close), 2),
         "data_source": REAL_DATA_SOURCE,

@@ -34,7 +34,7 @@ ELEVATED_TRAIN = [
 def fetch_real_data(yf_ticker, start, end):
     import yfinance as yf
 
-    raw = yf.download(yf_ticker, start=start, end=end, progress=False, auto_adjust=False, threads=False)
+    raw = yf.download(yf_ticker, start=start, end=end, progress=False, auto_adjust=True, threads=False)
     if raw.empty or "Close" not in raw.columns.get_level_values(0):
         raise ValueError(f"No data returned for {yf_ticker}")
     close = raw["Close"]
