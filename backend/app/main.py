@@ -37,7 +37,13 @@ def get_results(ticker: str):
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail=f"No precomputed results for {ticker}")
     with open(path) as f:
-        return json.load(f)
+        payload = json.load(f)
+    if payload.get("data_source") != "yfinance":
+        raise HTTPException(
+            status_code=503,
+            detail=f"Verified real-data evaluation for {ticker} is not available yet. Run the training pipeline to fetch Yahoo Finance data and regenerate results.",
+        )
+    return payload
 
 
 @app.get("/api/predict/{ticker}")

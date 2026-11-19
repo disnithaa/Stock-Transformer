@@ -12,20 +12,21 @@ import {
   ReferenceLine,
 } from "recharts";
 
-const axisStyle = { fontSize: 11, fontFamily: "IBM Plex Mono", fill: "#9aa3ad" };
-const gridColor = "#262e38";
+const axisStyle = { fontSize: 10, fontFamily: "DM Mono", fill: "#8290a0" };
+const gridColor = "#26313d";
 
 function tooltipStyle() {
   return {
-    background: "#182029",
-    border: "1px solid #262e38",
-    borderRadius: 4,
-    fontFamily: "IBM Plex Mono",
-    fontSize: 12,
+    background: "#19222d",
+    border: "1px solid #33404e",
+    borderRadius: 7,
+    color: "#f2f5f8",
+    fontFamily: "DM Mono",
+    fontSize: 11,
   };
 }
 
-export function TimelineChart({ dates, closes, splitDate, color }) {
+export function TimelineChart({ dates, closes, splitDate }) {
   const data = dates.map((d, i) => ({ date: d, close: closes[i] }));
   return (
     <ResponsiveContainer width="100%" height={280}>
@@ -33,15 +34,15 @@ export function TimelineChart({ dates, closes, splitDate, color }) {
         <CartesianGrid stroke={gridColor} vertical={false} />
         <XAxis dataKey="date" tick={axisStyle} minTickGap={60} />
         <YAxis tick={axisStyle} width={56} domain={["auto", "auto"]} />
-        <Tooltip contentStyle={tooltipStyle()} labelStyle={{ color: "#e8e6df" }} />
+        <Tooltip contentStyle={tooltipStyle()} labelStyle={{ color: "#c4ced9" }} formatter={(v) => [`₹${Number(v).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, "Close"]} />
         {splitDate && <ReferenceLine x={splitDate} stroke="#9aa3ad" strokeDasharray="3 3" />}
-        <Line type="monotone" dataKey="close" stroke={color} dot={false} strokeWidth={1.4} name="Close" />
+        <Line type="monotone" dataKey="close" stroke="#62d7b0" dot={false} strokeWidth={1.5} name="Close" />
       </LineChart>
     </ResponsiveContainer>
   );
 }
 
-export function PredictedVsActualChart({ dates, actual, predicted, color }) {
+export function PredictedVsActualChart({ dates, actual, predicted }) {
   const data = dates.map((d, i) => ({ date: d, actual: actual[i], predicted: predicted[i] }));
   return (
     <ResponsiveContainer width="100%" height={280}>
@@ -49,16 +50,16 @@ export function PredictedVsActualChart({ dates, actual, predicted, color }) {
         <CartesianGrid stroke={gridColor} vertical={false} />
         <XAxis dataKey="date" tick={axisStyle} minTickGap={60} />
         <YAxis tick={axisStyle} width={56} domain={["auto", "auto"]} />
-        <Tooltip contentStyle={tooltipStyle()} labelStyle={{ color: "#e8e6df" }} />
-        <Legend wrapperStyle={{ fontSize: 12, fontFamily: "IBM Plex Sans" }} />
-        <Line type="monotone" dataKey="actual" stroke={color} dot={false} strokeWidth={1.6} name="Actual close" />
-        <Line type="monotone" dataKey="predicted" stroke="#c9a227" dot={false} strokeWidth={1.2} strokeDasharray="4 3" name="Predicted (1-step)" />
+        <Tooltip contentStyle={tooltipStyle()} labelStyle={{ color: "#c4ced9" }} formatter={(v, name) => [`₹${Number(v).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, name]} />
+        <Legend wrapperStyle={{ fontSize: 10, fontFamily: "DM Sans" }} />
+        <Line type="monotone" dataKey="actual" stroke="#62d7b0" dot={false} strokeWidth={1.6} name="Actual close" />
+        <Line type="monotone" dataKey="predicted" stroke="#a5b4fc" dot={false} strokeWidth={1.3} strokeDasharray="5 4" name="Predicted (1-step)" />
       </LineChart>
     </ResponsiveContainer>
   );
 }
 
-export function UncertaintyChart({ dates, actual, p10, p90, color }) {
+export function UncertaintyChart({ dates, actual, p10, p90 }) {
   const data = dates.map((d, i) => ({ date: d, actual: actual[i], band: [p10[i], p90[i]] }));
   return (
     <ResponsiveContainer width="100%" height={280}>
@@ -66,9 +67,9 @@ export function UncertaintyChart({ dates, actual, p10, p90, color }) {
         <CartesianGrid stroke={gridColor} vertical={false} />
         <XAxis dataKey="date" tick={axisStyle} minTickGap={60} />
         <YAxis tick={axisStyle} width={56} domain={["auto", "auto"]} />
-        <Tooltip contentStyle={tooltipStyle()} labelStyle={{ color: "#e8e6df" }} />
-        <Area dataKey="band" stroke="none" fill="#c9a227" fillOpacity={0.18} name="80% MC-dropout CI" />
-        <Line type="monotone" dataKey="actual" stroke={color} dot={false} strokeWidth={1.4} name="Actual close" />
+        <Tooltip contentStyle={tooltipStyle()} labelStyle={{ color: "#c4ced9" }} />
+        <Area dataKey="band" stroke="#a5b4fc" strokeWidth={1} fill="#a5b4fc" fillOpacity={0.16} name="MC dropout interval" />
+        <Line type="monotone" dataKey="actual" stroke="#62d7b0" dot={false} strokeWidth={1.4} name="Actual close" />
       </AreaChart>
     </ResponsiveContainer>
   );
@@ -83,10 +84,10 @@ export function LossChart({ trainLosses, valLosses, bestEpoch }) {
         <XAxis dataKey="epoch" tick={axisStyle} />
         <YAxis tick={axisStyle} width={48} />
         <Tooltip contentStyle={tooltipStyle()} labelStyle={{ color: "#e8e6df" }} />
-        <Legend wrapperStyle={{ fontSize: 12, fontFamily: "IBM Plex Sans" }} />
-        <ReferenceLine x={bestEpoch} stroke="#c9a227" strokeDasharray="3 3" label={{ value: "best", fill: "#c9a227", fontSize: 11 }} />
-        <Line type="monotone" dataKey="train" stroke="#5b9bd9" dot={false} strokeWidth={1.4} name="Train MSE" />
-        <Line type="monotone" dataKey="val" stroke="#e5484d" dot={false} strokeWidth={1.4} name="Validation MSE" />
+        <Legend wrapperStyle={{ fontSize: 10, fontFamily: "DM Sans" }} />
+        <ReferenceLine x={bestEpoch} stroke="#f2be68" strokeDasharray="3 3" label={{ value: "best", fill: "#f2be68", fontSize: 10 }} />
+        <Line type="monotone" dataKey="train" stroke="#62d7b0" dot={false} strokeWidth={1.4} name="Train MSE" />
+        <Line type="monotone" dataKey="val" stroke="#a5b4fc" dot={false} strokeWidth={1.4} name="Validation MSE" />
       </LineChart>
     </ResponsiveContainer>
   );

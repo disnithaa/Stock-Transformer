@@ -5,7 +5,7 @@ FEATURES = ["LogReturn", "lag1_ret", "lag2_ret", "vol20", "mean_ret20", "rsi14",
 WINDOW = 20
 
 
-def compute_features(df: pd.DataFrame) -> pd.DataFrame:
+def compute_features(df: pd.DataFrame, require_target: bool = True) -> pd.DataFrame:
     """Nine causal (no look-ahead) features per trading day. Target: next-day log-return."""
     df = df.copy()
     df["Date"] = pd.to_datetime(df["Date"])
@@ -24,7 +24,9 @@ def compute_features(df: pd.DataFrame) -> pd.DataFrame:
     df["dow_sin"] = np.sin(2 * np.pi * df["Date"].dt.dayofweek / 5)
     df["dow_cos"] = np.cos(2 * np.pi * df["Date"].dt.dayofweek / 5)
     df["target_ret"] = df["LogReturn"].shift(-1)
-    return df.dropna().reset_index(drop=True)
+    if require_target:
+        return df.dropna().reset_index(drop=True)
+    return df.dropna(subset=FEATURES).reset_index(drop=True)
 
 
 def make_sequences(df: pd.DataFrame, window: int = WINDOW):
@@ -43,7 +45,7 @@ def make_sequences(df: pd.DataFrame, window: int = WINDOW):
 
 def latest_window(df: pd.DataFrame, window: int = WINDOW):
     """Build the single most recent feature window for a live next-day prediction."""
-    feat_df = compute_features(df)
+    feat_df = compute_features(df, require_target=False)
     feat = feat_df[FEATURES].values
     if len(feat) < window:
         raise ValueError("Not enough history to build a feature window")

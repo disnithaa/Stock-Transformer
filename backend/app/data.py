@@ -1,8 +1,10 @@
 import numpy as np
 import pandas as pd
 from scipy.interpolate import PchipInterpolator
+from datetime import datetime, timezone
 
 TICKERS = {"INFY": "INFY.NS", "HUL": "HINDUNILVR.NS"}
+REAL_DATA_SOURCE = "yfinance"
 TRAIN_START, TRAIN_END = "2000-01-01", "2024-12-31"
 TEST_START, TEST_END = "2025-01-01", "2026-06-30"
 
@@ -32,12 +34,22 @@ ELEVATED_TRAIN = [
 def fetch_real_data(yf_ticker, start, end):
     import yfinance as yf
 
-    df = yf.download(yf_ticker, start=start, end=end, progress=False)
-    if df.empty:
+    raw = yf.download(yf_ticker, start=start, end=end, progress=False, auto_adjust=False, threads=False)
+    if raw.empty or "Close" not in raw.columns.get_level_values(0):
         raise ValueError(f"No data returned for {yf_ticker}")
-    df = df[["Close"]].reset_index()
-    df.columns = ["Date", "Close"]
+    close = raw["Close"]
+    if isinstance(close, pd.DataFrame):
+        close = close[yf_ticker] if yf_ticker in close.columns else close.iloc[:, 0]
+    dates = pd.to_datetime(raw.index)
+    if dates.tz is not None:
+        dates = dates.tz_localize(None)
+    df = pd.DataFrame({"Date": dates, "Close": pd.to_numeric(close, errors="coerce").to_numpy()})
+    df = df.dropna(subset=["Date", "Close"]).sort_values("Date").drop_duplicates("Date").reset_index(drop=True)
+    if df.empty:
+        raise ValueError(f"No valid closing prices returned for {yf_ticker}")
     df["LogReturn"] = np.log(df["Close"] / df["Close"].shift(1))
+    df.attrs["data_source"] = REAL_DATA_SOURCE
+    df.attrs["data_fetched_at"] = datetime.now(timezone.utc).isoformat()
     return df
 
 
@@ -118,10 +130,12 @@ def generate_synthetic(ticker):
 
 
 def load_stock_data(ticker: str, use_real: bool = True, start: str = TRAIN_START, end: str = TEST_END) -> pd.DataFrame:
-    """Real yfinance data if available and use_real=True, else synthetic fallback."""
+    """Load verified Yahoo Finance data; synthetic data is available only by explicit opt-in."""
     if use_real:
         try:
+            if ticker not in TICKERS:
+                raise ValueError(f"Unknown ticker {ticker}")
             return fetch_real_data(TICKERS[ticker], start, end)
-        except Exception:
-            pass
+        except Exception as exc:
+            raise RuntimeError(f"Could not fetch real market data for {ticker} from Yahoo Finance: {exc}") from exc
     return generate_synthetic(ticker)
